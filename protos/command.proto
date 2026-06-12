@@ -1,0 +1,8 @@
+syntax = "proto3";
+package stack.command;
+
+// A sample command to change a subsystem's state
+message SetStateCommand {
+    string subsystem_target = 1;
+    bool is_active = 2;
+}

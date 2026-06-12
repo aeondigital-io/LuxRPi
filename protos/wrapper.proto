@@ -1,0 +1,18 @@
+syntax = "proto3";
+package stack.wrapper;
+
+// Import our specific payload definitions
+import "protos/telemetry.proto";
+import "protos/command.proto";
+
+message MessageWrapper {
+    // Routing Metadata
+    uint64 timestamp_ms = 1;
+    string source_service = 2;
+
+    // The oneof block means the wrapper can hold ONE of these at a time
+    oneof payload {
+        stack.telemetry.TemperatureTelemetry temp_tlm = 3;
+        stack.command.SetStateCommand state_cmd = 4;
+    }
+}
