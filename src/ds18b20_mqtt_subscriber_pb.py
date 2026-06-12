@@ -1,36 +1,78 @@
+#!/usr/bin/env python3
 import datetime
-import time
-from protos import telemetry_pb2
+import paho.mqtt.client as mqtt
+
+# Import the generated protobuf module
 from protos import wrapper_pb2
+
+# Configuration - Match these with your publisher script
+BROKER = "localhost" # Or your broker IP
+PORT = 1883
+TOPIC = "sensors/temperature/#" # The topic you are publishing to with wildcard for all sensors
 
 def process_incoming_payload(payload_bytes):
     """
     Unpacks the MessageWrapper and prints temperature data to stdout.
     """
-    # 1. Parse the raw bytes into the Wrapper object
-    wrapper = wrapper_pb2.MessageWrapper()
-    wrapper.ParseFromString(payload_bytes)
+    try:
+        # 1. Parse the raw bytes into the Wrapper object
+        wrapper = wrapper_pb2.MessageWrapper()
+        wrapper.ParseFromString(payload_bytes)
 
-    # 2. Convert timestamp_ms (integer) to a readable datetime string
-    dt = datetime.datetime.fromtimestamp(wrapper.timestamp_ms / 1000.0)
-    readable_time = dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        # 2. Convert timestamp_ms (integer) to a readable datetime string
+        dt = datetime.datetime.fromtimestamp(wrapper.timestamp_ms / 1000.0)
+        readable_time = dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
 
-    # 3. Check which part of the 'oneof' payload was received
-    if wrapper.HasField('temp_tlm'):
-        telemetry = wrapper.temp_tlm
-        print(f"[{readable_time}] ID: {telemetry.sensor_id} | Temp: {telemetry.temperature_celsius:.2f}°C")
+        # 3. Check which part of the 'oneof' payload was received
+        if wrapper.HasField('temp_tlm'):
+            telemetry = wrapper.temp_tlm
+            print(f"[{readable_time}] ID: {telemetry.sensor_id} | Temp: {telemetry.temperature_celsius:.2f}°C")
+        else:
+            print(f"[{readable_time}] Received unknown or empty payload type.")
+            
+    except Exception as e:
+        print(f"[Error] Failed to parse protobuf message: {e}")
+
+def on_connect(client, userdata, flags, rc, properties=None):
+    # Handle older paho-mqtt versions vs newer v2 versions smoothly
+    if isinstance(rc, int):
+        conn_rc = rc
     else:
-        print(f"[{readable_time}] Received unknown or empty payload type.")
+        conn_rc = getattr(rc, "value", rc)
+        
+    if conn_rc == 0:
+        print(f"Connected successfully to {BROKER}")
+        # Subscribed on connection
+        client.subscribe(TOPIC)
+        print(f"Subscribed to topic: {TOPIC}")
+    else:
+        print(f"Connection failed with code {conn_rc}")
 
-# Example usage/test:
-if __name__ == "__main__":
-    print("Testing un-packing logic...")
-    # Manually creating a fake payload for testing purposes
-    test_wrapper = wrapper_pb2.MessageWrapper()
-    test_wrapper.timestamp_ms = int(time.time() * 1000)
-    test_wrapper.source_service = "ds18b20_sensor"
-    test_wrapper.temp_tlm.sensor_id = "TEST_SENSOR"
-    test_wrapper.temp_tl1.temperature_celsius = 22.7
+def on_message(client, userdata, msg):
+    # msg.payload is delivered natively as bytes, perfect for Protobuf
+    process_incoming_payload(msg.payload)
+
+def main():
+    print("Starting DS18B20 Protobuf Subscriber...")
     
-    fake_payload = test_wrapper.SerializeToString()
-    process_incoming_payload(fake_payload)
+    # Initialize client (with v2 callback API support fallback like the publisher)
+    try:
+        client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+    except AttributeError:
+        client = mqtt.Client()
+        
+    client.on_connect = on_connect
+    client.on_message = on_message
+
+    # Connect and loop
+    try:
+        print(f"Connecting to {BROKER}:{PORT}...")
+        client.connect(BROKER, PORT, 60)
+        client.loop_forever()
+    except KeyboardInterrupt:
+        print("\nSubscriber stopped via KeyboardInterrupt.")
+    except Exception as e:
+        print(f"Connection error: {e}")
+
+if __name__ == "__main__":
+    main()
